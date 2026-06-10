@@ -1,36 +1,59 @@
 # app.py
 import time
 import uuid
-from flask import Flask, render_template_string, request, jsonify, send_file
+import requests
+from flask import Flask, render_template_string, request, jsonify, send_file, Response, stream_with_context
 
 app = Flask(__name__)
 app.secret_key = 'vercel_cloud_hub_2026'
 
-# Stateless storage (Lưu ý: Vercel reset bộ nhớ thường xuyên, 
-# nhưng đủ để xử lý các tác vụ tức thời)
 tasks = {}
 results = {}
-online_nodes = {}
+stream_links = {}  # Lưu trữ link youtube thực tế để làm cổng trung gian
 
 @app.route('/download/proxy')
 def download_proxy():
     return send_file('proxy.py', as_attachment=True)
 
-# --- API FOR HOME PROXY ---
-@app.route('/api/node/register', methods=['POST'])
-def register_node():
-    data = request.json
-    node_id = data.get('node_id')
-    online_nodes[node_id] = {
-        'info': data.get('info'),
-        'last_seen': time.time()
-    }
-    return jsonify({"status": "registered"})
+# ==========================================================
+# 💥 CỔNG TRUNG GIAN GIẢI MÃ: STREAM TUNNEL (SỬA LỖI 403 FORBIDDEN)
+# ==========================================================
+@app.route('/stream_tunnel')
+def stream_tunnel():
+    video_id = request.args.get('v')
+    real_url = stream_links.get(video_id)
+    
+    if not real_url:
+        return "Video stream link expired or invalid. Please refresh.", 404
 
+    req_headers = {}
+    if 'Range' in request.headers:
+        req_headers['Range'] = request.headers['Range']
+    req_headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+
+    try:
+        # Vercel đứng ra tải hộ video từ YouTube theo từng đoạn nhỏ (Chunk)
+        res = requests.get(real_url, headers=req_headers, stream=True, timeout=15)
+        
+        def generate():
+            for chunk in res.iter_content(chunk_size=1024 * 256): # 256KB mỗi chunk
+                if chunk:
+                    yield chunk
+
+        tunnel_res = Response(stream_with_context(generate()), status=res.status_code)
+        for key, value in res.headers.items():
+            if key.lower() in ['content-type', 'content-range', 'accept-ranges', 'content-length']:
+                tunnel_res.headers[key] = value
+        
+        # Ép thêm Header CORS để trình duyệt không bao giờ chặn
+        tunnel_res.headers['Access-Control-Allow-Origin'] = '*'
+        return tunnel_res
+    except Exception as e:
+        return f"Stream tunnel error: {str(e)}", 500
+
+# --- API FOR HOME PROXY ---
 @app.route('/api/node/tasks', methods=['GET'])
 def get_tasks():
-    # Proxy gọi vào đây để lấy việc
-    node_id = request.args.get('node_id')
     pending = [t for t in tasks.values() if t['status'] == 'pending']
     return jsonify(pending)
 
@@ -46,12 +69,6 @@ def submit_result():
 # --- MAIN UI ---
 @app.route('/')
 def index():
-    search_q = request.args.get('q', '')
-    video_id = request.args.get('v', '')
-    
-    # Tạo Task ID duy nhất cho mỗi lần nhấn
-    current_task_id = str(uuid.uuid4())
-    
     HTML_UI = """
     <!DOCTYPE html>
     <html lang="en">
@@ -62,32 +79,24 @@ def index():
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
         <style>
             body { background: #0a0a0c; color: #e2e2e9; font-family: 'Segoe UI', sans-serif; }
-            .navbar { background: #111 !important; border-bottom: 1px solid #222; }
-            .navbar-brand { font-weight: 900; color: #ff0055 !important; }
             .main-card { background: #12121a; border: 1px solid #1f1f2e; border-radius: 16px; padding: 25px; margin-bottom: 20px; }
             .btn-danger { background: #ff0055; border: none; font-weight: bold; }
-            .proxy-badge { font-size: 11px; padding: 5px 12px; border-radius: 20px; background: #1a1a26; border: 1px solid #333; }
-            
-            /* Custom Player */
             .player-wrapper { position: relative; width: 100%; border-radius: 15px; overflow: hidden; background: #000; box-shadow: 0 10px 40px rgba(0,0,0,0.8); }
             .player-wrapper video { width: 100%; display: block; }
             .custom-controls { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.9)); padding: 20px; opacity: 0; transition: 0.3s; }
             .player-wrapper:hover .custom-controls { opacity: 1; }
             .progress-bar { height: 5px; background: rgba(255,255,255,0.2); cursor: pointer; border-radius: 10px; margin-bottom: 15px; }
             .progress-fill { height: 100%; width: 0%; background: #ff0055; border-radius: 10px; }
-            
-            /* Video Grid */
             .v-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; }
-            .v-item { background: #161622; border-radius: 12px; overflow: hidden; border: 1px solid #222; text-decoration: none; color: inherit; transition: 0.2s; }
+            .v-item { background: #161622; border-radius: 12px; overflow: hidden; border: 1px solid #222; cursor: pointer; transition: 0.2s; }
             .v-item:hover { transform: translateY(-5px); border-color: #ff0055; }
             .v-thumb { width: 100%; aspect-ratio: 16/9; object-fit: cover; }
             .v-info { padding: 12px; font-size: 13px; font-weight: 600; line-height: 1.4; height: 50px; overflow: hidden; }
         </style>
     </head>
     <body>
-        <nav class="navbar navbar-dark px-4 shadow-sm">
-            <span class="navbar-brand">🪐 CLOUD STREAM CENTER</span>
-            <div id="nodeStatus">Checking Proxy Nodes...</div>
+        <nav class="navbar navbar-dark bg-dark px-4 shadow-sm">
+            <span class="navbar-brand text-danger fw-bold">🪐 CLOUD STREAM CENTER</span>
         </nav>
 
         <div class="container-fluid py-4 px-4">
@@ -95,18 +104,14 @@ def index():
                 <div class="col-lg-3">
                     <div class="main-card">
                         <h6 class="text-warning mb-3">🔍 GLOBAL SEARCH</h6>
-                        <input type="text" id="searchInput" class="form-control bg-dark text-white border-secondary mb-3" placeholder="Enter keywords..." value="{{ search_q }}">
-                        <button onclick="runTask('search')" class="btn btn-danger w-100">SEARCH NOW</button>
-                    </div>
-                    <div class="main-card text-center">
-                        <p class="text-muted small">No active nodes? Run the script at home.</p>
-                        <a href="/download/proxy" class="btn btn-sm btn-outline-light w-100">📥 DOWNLOAD PROXY</a>
+                        <div class="input-group">
+                            <input type="text" id="searchInput" class="form-control bg-dark text-white border-secondary" placeholder="Enter keywords...">
+                            <button onclick="runTask('search')" class="btn btn-danger">SEARCH</button>
+                        </div>
                     </div>
                 </div>
 
                 <div class="col-lg-9">
-                    <div id="statusAlert" class="alert alert-info" style="display:none;"></div>
-                    
                     <div id="playerSection" class="main-card" style="display:none;">
                         <h5 id="vTitle" class="mb-3 text-info"></h5>
                         <div class="player-wrapper">
@@ -135,36 +140,34 @@ def index():
 
             async function runTask(type, val = "") {
                 const q = document.getElementById('searchInput').value;
-                const v = val || new URLSearchParams(window.location.search).get('v');
-                
                 const btn = document.querySelector('.btn-danger');
                 btn.disabled = true;
-                btn.innerText = "WAITING FOR PROXY...";
+                btn.innerText = "WAITING...";
                 
                 const res = await fetch('/api/create_task', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({type: type, query: q, video_id: v})
+                    body: JSON.stringify({type: type, query: q, video_id: val})
                 });
                 const data = await res.json();
                 currentTaskId = data.task_id;
-                pollResult();
+                pollResult(type, val);
             }
 
-            async function pollResult() {
-                const res = await fetch('/api/poll_result?task_id=' + currentTaskId);
+            async function pollResult(type, val) {
+                const res = await fetch('/api/poll_result?task_id=' + currentTaskId + '&video_id=' + val);
                 const data = await res.json();
                 
                 if (data.status === 'completed') {
                     document.querySelector('.btn-danger').disabled = false;
-                    document.querySelector('.btn-danger').innerText = "SEARCH NOW";
-                    renderData(data.result);
+                    document.querySelector('.btn-danger').innerText = "SEARCH";
+                    renderData(data.result, data.tunnel_url);
                 } else {
-                    setTimeout(pollResult, 2000); // Thử lại sau 2 giây
+                    setTimeout(() => pollResult(type, val), 2000);
                 }
             }
 
-            function renderData(data) {
+            function renderData(data, tunnelUrl) {
                 if (data.videos) {
                     let html = "";
                     data.videos.forEach(v => {
@@ -176,11 +179,11 @@ def index():
                     });
                     document.getElementById('videoGrid').innerHTML = html;
                 }
-                if (data.stream_url) {
+                if (tunnelUrl) {
                     document.getElementById('playerSection').style.display = "block";
                     document.getElementById('vTitle').innerText = data.title;
                     const video = document.getElementById('videoPlayer');
-                    video.src = data.stream_url;
+                    video.src = tunnelUrl; // SỬ DỤNG LINK TUNNEL ĐỂ TRÁNH LỖI 403
                     video.play();
                 }
             }
@@ -190,7 +193,6 @@ def index():
                 window.scrollTo({top: 0, behavior: 'smooth'});
             }
 
-            // Player Logic
             const v = document.getElementById('videoPlayer');
             function togglePlay() { 
                 if(v.paused) { v.play(); document.getElementById('playIcon').className = 'fas fa-pause'; }
@@ -203,8 +205,8 @@ def index():
         </script>
     </body>
     </html>
-    """
-    return render_template_string(HTML_UI, search_q=search_q)
+    '''
+    return render_template_string(HTML_UI)
 
 @app.route('/api/create_task', methods=['POST'])
 def create_task():
@@ -222,8 +224,17 @@ def create_task():
 @app.route('/api/poll_result')
 def poll_result():
     task_id = request.args.get('task_id')
+    video_id = request.args.get('video_id')
+    
     if task_id in results:
-        return jsonify({"status": "completed", "result": results[task_id]})
+        res_data = results[task_id]
+        tunnel_url = None
+        # Nếu là tác vụ lấy link, lưu lại link gốc và cấp link tunnel nội bộ
+        if res_data and 'stream_url' in res_data:
+            stream_links[video_id] = res_data['stream_url']
+            tunnel_url = f"/stream_tunnel?v={video_id}"
+            
+        return jsonify({"status": "completed", "result": res_data, "tunnel_url": tunnel_url})
     return jsonify({"status": "pending"})
 
 if __name__ == '__main__':

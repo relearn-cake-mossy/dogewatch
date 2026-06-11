@@ -1,423 +1,719 @@
-from flask import Flask, render_template_string, request, jsonify, Response, stream_with_context
+from flask import Flask, request, jsonify, Response, render_template_string
 import uuid
 import time
-import queue
 
 app = Flask(__name__)
-app.secret_key = 'vercel_ping_stream_2026'
 
-# Quản lý trạng thái các task
-tasks = {}
-video_streams = {}
+# In-memory cluster arrays
+tasks_queue = []
+tasks_results = {}
+video_buffers = {}
+active_nodes = {}  # Tracking client node heartbeats
 
-@app.route('/api/node/tasks', methods=['GET'])
-def get_tasks():
-    pending = [t for t in tasks.values() if t['status'] == 'pending']
-    return jsonify(pending)
+# High-fidelity Windows 11 Fluent Design & Aesthetic Dark Interface Layout
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DogeWatch Nexus - Premium Core</title>
+    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-mica: #030307;
+            --bg-acrylic: rgba(15, 15, 23, 0.7);
+            --bg-card: rgba(30, 30, 45, 0.45);
+            --bg-card-hover: rgba(45, 45, 65, 0.6);
+            --accent-primary: #60cdff;
+            --accent-system: #0078d4;
+            --accent-glow: rgba(96, 205, 255, 0.25);
+            --text-main: #ffffff;
+            --text-secondary: #adadbc;
+            --text-disabled: #646473;
+            --border-fluent: rgba(255, 255, 255, 0.07);
+            --border-fluent-bright: rgba(255, 255, 255, 0.12);
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --transition-fluent: all 0.25s cubic-bezier(0.1, 0.9, 0.2, 1);
+        }
 
-@app.route('/api/node/submit', methods=['POST'])
-def submit_result():
-    data = request.json
-    task_id = data.get('task_id')
-    if task_id in tasks:
-        tasks[task_id]['status'] = 'completed'
-        tasks[task_id]['result'] = data.get('result')
-    return jsonify({"status": "received"})
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
 
-@app.route('/api/node/upload_chunk', methods=['POST'])
-def upload_chunk():
-    session_id = request.args.get('session_id')
-    chunk_data = request.data
-    
-    if session_id in video_streams:
-        if len(chunk_data) == 0:
-            video_streams[session_id].put(None)
-        else:
-            video_streams[session_id].put(chunk_data)
-        return "OK", 200
-    return "Session Expired", 410
+        body {
+            background: var(--bg-mica);
+            color: var(--text-main);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
 
-@app.route('/stream/<session_id>')
-def stream_video(session_id):
-    if session_id not in video_streams:
-        video_streams[session_id] = queue.Queue(maxsize=50)
+        /* --- GLOBAL FLUENT HEADER --- */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 24px;
+            height: 56px;
+            background: var(--bg-acrylic);
+            backdrop-filter: blur(30px);
+            -webkit-backdrop-filter: blur(30px);
+            border-bottom: 1px solid var(--border-fluent);
+            z-index: 100;
+            flex-shrink: 0;
+        }
 
-    def generate():
-        q = video_streams[session_id]
-        consecutive_empty_loops = 0
+        .brand-zone {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-logo {
+            font-size: 0.95rem;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            background: linear-gradient(135deg, #fff 0%, var(--accent-primary) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .build-tag {
+            font-size: 0.65rem;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-fluent);
+            font-family: monospace;
+        }
+
+        /* --- TELEMETRY NODE BADGE --- */
+        .node-telemetry-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-fluent);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            transition: var(--transition-fluent);
+        }
+
+        .node-telemetry-card:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: var(--border-fluent-bright);
+        }
+
+        .status-indicator {
+            position: relative;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #2ccb5b;
+            box-shadow: 0 0 10px #2ccb5b;
+        }
+
+        .status-indicator.pulse::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: inherit;
+            animation: fluentPulse 2s infinite ease-in-out;
+        }
+
+        .status-indicator.offline {
+            background: #f74343;
+            box-shadow: 0 0 10px #f74343;
+        }
+
+        .node-details {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.2;
+        }
+
+        .node-label { color: var(--text-secondary); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .node-value { font-weight: 500; color: var(--text-main); }
+
+        /* --- MAIN CONTAINER STRUCTURE --- */
+        .app-shell {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* --- SIDEBAR NAVIGATION --- */
+        nav.sidebar {
+            width: 260px;
+            background: rgba(10, 10, 15, 0.4);
+            border-right: 1px solid var(--border-fluent);
+            padding: 16px 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+
+        @media (max-width: 850px) {
+            nav.sidebar { display: none; }
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            color: var(--text-secondary);
+            border-radius: var(--radius-md);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 500;
+            transition: var(--transition-fluent);
+            cursor: pointer;
+            position: relative;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-card-hover);
+            color: var(--text-main);
+        }
+
+        .nav-item.active {
+            background: var(--bg-card);
+            color: var(--accent-primary);
+            font-weight: 600;
+        }
+
+        .nav-item.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 25%;
+            height: 50%;
+            width: 3px;
+            background: var(--accent-primary);
+            border-radius: var(--radius-sm);
+        }
+
+        .nav-category {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--text-disabled);
+            padding: 12px 14px 6px 14px;
+            letter-spacing: 0.8px;
+        }
+
+        /* --- WORKSPACE VIEWSPACE --- */
+        main.workspace {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            background: radial-gradient(circle at top right, rgba(0, 120, 212, 0.05), transparent 600px);
+        }
+
+        /* --- INTEGRATED SEARCH HEADER --- */
+        .search-container {
+            max-width: 640px;
+            margin: 0 auto 32px auto;
+        }
+
+        .fluent-search-bar {
+            display: flex;
+            background: var(--bg-card);
+            border: 1px solid var(--border-fluent);
+            border-bottom: 1px solid var(--border-fluent-bright);
+            padding: 5px;
+            border-radius: var(--radius-md);
+            box-shadow: inset 0 1px 1px rgba(255,255,255,0.04);
+            transition: var(--transition-fluent);
+        }
+
+        .fluent-search-bar:focus-within {
+            background: rgba(20, 20, 30, 0.8);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 16px var(--accent-glow);
+        }
+
+        .fluent-search-bar input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: var(--text-main);
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+
+        .fluent-search-bar input::placeholder { color: var(--text-disabled); }
+
+        .fluent-search-bar button {
+            background: var(--accent-system);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 0 20px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition-fluent);
+        }
+
+        .fluent-search-bar button:hover {
+            background: #0086f0;
+            box-shadow: 0 4px 12px rgba(0, 120, 212, 0.3);
+        }
+
+        /* --- HIGH-END HOLLYWOOD THEATER VIEW (PLAYER) --- */
+        #theater-stage {
+            display: none;
+            max-width: 1000px;
+            margin: 0 auto 36px auto;
+            animation: fluentReveal 0.40s cubic-bezier(0.1, 0.9, 0.2, 1) forwards;
+        }
+
+        .player-canvas {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: #000;
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            border: 1px solid var(--border-fluent);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+            position: relative;
+        }
+
+        .player-canvas video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        /* --- MODERN CONTENT TYPOGRAPHY --- */
+        .section-header {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+            margin-bottom: 18px;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-header::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border-fluent);
+        }
+
+        /* --- EXTENSIVE MATRIX VIDEO GRID --- */
+        .matrix-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        @media (max-width: 500px) {
+            .matrix-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+        }
+
+        .fluent-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-fluent);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            cursor: pointer;
+            position: relative;
+            transition: var(--transition-fluent);
+        }
+
+        .fluent-card:hover {
+            transform: translateY(-4px);
+            background: var(--bg-card-hover);
+            border-color: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 12px 28px rgba(0,0,0,0.45);
+        }
+
+        .card-viewscreen {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: #07070a;
+            overflow: hidden;
+        }
+
+        .card-viewscreen img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.3s ease;
+        }
+
+        .fluent-card:hover .card-viewscreen img {
+            transform: scale(1.03);
+        }
+
+        .card-metadata {
+            padding: 12px;
+        }
+
+        .card-title {
+            font-size: 0.85rem;
+            font-weight: 500;
+            line-height: 1.4;
+            color: var(--text-main);
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            height: 2.8em;
+        }
+
+        /* --- ADVANCED SKELETON LOAD SHIMMER --- */
+        .skeleton-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-fluent);
+            border-radius: var(--radius-lg);
+            height: 215px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .skeleton-shimmer {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.03) 50%, transparent 100%);
+            background-size: 200% 100%;
+            animation: fluentShimmer 1.5s infinite linear;
+        }
+
+        /* --- TELEMETRY STATUS PANEL --- */
+        .loading-dashboard {
+            display: none;
+            background: rgba(255,255,255,0.01);
+            border: 1px dashed var(--border-fluent);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            text-align: center;
+            max-width: 400px;
+            margin: 20px auto;
+            font-size: 0.85rem;
+            color: var(--accent-primary);
+        }
+
+        /* --- ANIMATION ARRAYS --- */
+        @keyframes fluentPulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(44, 203, 91, 0.5); }
+            70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(44, 203, 91, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(44, 203, 91, 0); }
+        }
+        @keyframes fluentShimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        @keyframes fluentReveal {
+            from { opacity: 0; transform: translateY(12px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="brand-zone">
+            <span class="brand-logo">DOGEWATCH // NEXUS</span>
+            <span class="build-tag">v3.5.0-EJS</span>
+        </div>
         
-        while True:
-            try:
-                chunk = q.get(timeout=2.0)
-                if chunk is None:
-                    break
-                consecutive_empty_loops = 0
-                yield chunk
-            except queue.Empty:
-                consecutive_empty_loops += 1
-                if consecutive_empty_loops > 10:
-                    break
-                yield b''
+        <div class="node-telemetry-card" id="node-matrix-badge">
+            <div class="status-indicator offline pulse" id="telemetry-dot"></div>
+            <div class="node-details">
+                <span class="node-label">Cluster Uplink</span>
+                <span class="node-value" id="telemetry-text">Locating Node...</span>
+            </div>
+        </div>
+    </header>
 
-    response = Response(stream_with_context(generate()), content_type="video/mp4")
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['X-Accel-Buffering'] = 'no'
-    return response
+    <div class="app-shell">
+        <nav class="sidebar">
+            <span class="nav-category">Discover</span>
+            <div class="nav-item active" onclick="loadDiscoverFeed()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+                Home Feed
+            </div>
+            <div class="nav-item" onclick="setSearchFocus()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                Search Station
+            </div>
+            
+            <span class="nav-category">System Hierarchy</span>
+            <div class="nav-item" style="cursor: default; opacity: 0.6;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect></svg>
+                Core Proxy Active
+            </div>
+        </nav>
+
+        <main class="workspace">
+            
+            <div class="search-container">
+                <div class="fluent-search-bar">
+                    <input type="text" id="nexus-search-input" placeholder="Query global video stream nodes...">
+                    <button onclick="executeNexusSearch()">Search Network</button>
+                </div>
+            </div>
+
+            <div id="theater-stage">
+                <div class="player-canvas">
+                    <video id="nexus-core-player" controls autoplay playsinline crossorigin="anonymous"></video>
+                </div>
+            </div>
+
+            <div class="loading-dashboard" id="nexus-pipeline-loader">
+                Parsing encryption layer & piping chunk sequences...
+            </div>
+
+            <h3 class="section-header" id="workspace-view-title">Network Index Feed</h3>
+            
+            <div class="matrix-grid" id="workspace-view-grid">
+                </div>
+        </main>
+    </div>
+
+    <script>
+        // 1. Maintain dynamic socket telemetry diagnostics for local proxy nodes
+        function runTelemetryDiagnostics() {
+            fetch('/api/web/node_status')
+                .then(res => res.json())
+                .then(data => {
+                    const dot = document.getElementById('telemetry-dot');
+                    const valueStr = document.getElementById('telemetry-text');
+                    if (data.connected) {
+                        dot.className = "status-indicator pulse";
+                        valueStr.innerText = `Home Proxy (${data.last_seen}s back)`;
+                    } else {
+                        dot.className = "status-indicator offline";
+                        valueStr.innerText = "Uplink Terminated";
+                    }
+                });
+        }
+
+        // 2. Generate multi-card mock skeletons during network load sequences
+        function renderGridSkeletons() {
+            const grid = document.getElementById('workspace-view-grid');
+            grid.innerHTML = '';
+            for (let i = 0; i < 8; i++) {
+                const skeleton = document.createElement('div');
+                skeleton.className = 'skeleton-card';
+                skeleton.innerHTML = '<div class="skeleton-shimmer"></div>';
+                grid.appendChild(skeleton);
+            }
+        }
+
+        // 3. Automated initial content feed download sequence
+        function loadDiscoverFeed() {
+            document.getElementById('workspace-view-title').innerText = "System Recommended Feed";
+            renderGridSkeletons();
+            
+            fetch('/api/web/search?q=mrbeast%20trending')
+                .then(res => res.json())
+                .then(data => {
+                    populateMatrixGrid(data.videos);
+                }).catch(() => {
+                    document.getElementById('workspace-view-grid').innerHTML = '';
+                });
+        }
+
+        function setSearchFocus() {
+            document.getElementById('nexus-search-input').focus();
+        }
+
+        function executeNexusSearch() {
+            const query = document.getElementById('nexus-search-input').value.trim();
+            if (!query) return;
+
+            document.getElementById('workspace-view-title').innerText = `Network Query Index: "${query}"`;
+            renderGridSkeletons();
+
+            fetch(`/api/web/search?q=${encodeURIComponent(query)}`)
+                .then(res => res.json())
+                .then(data => {
+                    populateMatrixGrid(data.videos);
+                });
+        }
+
+        // 4. Construct high-fidelity fluent object elements directly inside grid matrix
+        function populateMatrixGrid(videos) {
+            const grid = document.getElementById('workspace-view-grid');
+            grid.innerHTML = '';
+            
+            if (!videos || videos.length === 0) {
+                grid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:40px; color:var(--text-disabled); font-size:0.9rem;">No responsive nodes found matching parameters.</div>';
+                return;
+            }
+
+            videos.forEach(v => {
+                const card = document.createElement('div');
+                card.className = 'fluent-card';
+                card.onclick = () => mountStreamPipeline(v.id);
+                card.innerHTML = `
+                    <div class="card-viewscreen">
+                        <img src="${v.thumbnail}" alt="node_thumb" loading="lazy">
+                    </div>
+                    <div class="card-metadata">
+                        <div class="card-title">${v.title}</div>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        // 5. Mount encrypted backend stream array logic down to active proxy channels
+        function mountStreamPipeline(videoId) {
+            const stage = document.getElementById('theater-stage');
+            const player = document.getElementById('nexus-core-player');
+            const dashboard = document.getElementById('nexus-pipeline-loader');
+
+            stage.style.display = 'block';
+            dashboard.style.display = 'block';
+            stage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            fetch(`/api/web/extract?video_id=${videoId}`)
+                .then(res => res.json())
+                .then(data => {
+                    dashboard.style.display = 'none';
+                    if (data.session_id) {
+                        player.src = `/api/stream?session_id=${data.session_id}`;
+                        player.play();
+                    } else {
+                        alert("Nexus Pipeline Interrupted: Local routing gateway dropped task execution packets.");
+                    }
+                }).catch(() => {
+                    dashboard.style.display = 'none';
+                });
+        }
+
+        // Trigger systemic routines
+        window.onload = () => {
+            runTelemetryDiagnostics();
+            loadDiscoverFeed();
+            setInterval(runTelemetryDiagnostics, 4000); // Poll tracking arrays every 4000ms
+        };
+    </script>
+</body>
+</html>
+"""
 
 # =========================================================================
-# GIAO DIỆN LUXURY FLUENT DARK - ĐÃ ĐƯỢC TINH CHỈNH MỊN MÀNG, TỈ LỆ CHUẨN UX
+# WEB FRONTEND INTERFACE CHANNELS
 # =========================================================================
 @app.route('/')
 def index():
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="vi">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>DogeWatch Cloud Player</title>
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-        <style>
-            :root {
-                --bg-main: #0c0c14;
-                --bg-glow: radial-gradient(circle at 50% -20%, #1e1b4b 0%, #0c0c14 60%);
-                --surface-card: rgba(22, 22, 38, 0.6);
-                --surface-input: rgba(30, 30, 50, 0.7);
-                --border-fluent: rgba(255, 255, 255, 0.08);
-                --border-focus: #6366f1;
-                --accent-color: #818cf8;
-                --text-primary: #f3f4f6;
-                --text-secondary: #9ca3af;
-            }
+    return render_template_string(HTML_TEMPLATE)
 
-            body {
-                background: var(--bg-main);
-                background-image: var(--bg-glow);
-                color: var(--text-primary);
-                font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-                min-height: 100vh;
-                letter-spacing: -0.01em;
-            }
+@app.route('/api/web/node_status')
+def get_node_status():
+    if not active_nodes:
+        return jsonify({"connected": False})
+    last_node = list(active_nodes.values())[-1]
+    elapsed = int(time.time() - last_node)
+    return jsonify({"connected": elapsed < 15, "last_seen": elapsed})
 
-            .app-container {
-                max-width: 1100px;
-                padding-top: 2.5rem;
-                padding-bottom: 2.5rem;
-            }
+@app.route('/api/web/search')
+def web_search():
+    query = request.args.get('q', 'trending')
+    task_id = str(uuid.uuid4())
+    tasks_queue.append({'task_id': task_id, 'type': 'search', 'query': query})
+    
+    start = time.time()
+    while time.time() - start < 12:
+        if task_id in tasks_results:
+            return jsonify(tasks_results.pop(task_id))
+        time.sleep(0.2)
+    return jsonify({"videos": []})
 
-            /* Acrylic Glass Effect */
-            .fluent-card {
-                background: var(--surface-card);
-                backdrop-filter: blur(20px);
-                -webkit-backdrop-filter: blur(20px);
-                border: 1px solid var(--border-fluent);
-                border-radius: 12px;
-                padding: 1.5rem;
-                box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-                margin-bottom: 1.5rem;
-            }
+@app.route('/api/web/extract')
+def web_extract():
+    video_id = request.args.get('video_id')
+    session_id = f"sess_{str(uuid.uuid4())[:12]}"
+    task_id = str(uuid.uuid4())
+    
+    video_buffers[session_id] = []
+    tasks_queue.append({
+        'task_id': task_id, 
+        'type': 'extract', 
+        'video_id': video_id, 
+        'session_id': session_id
+    })
+    
+    start = time.time()
+    while time.time() - start < 10:
+        if task_id in tasks_results:
+            tasks_results.pop(task_id)
+            return jsonify({"session_id": session_id})
+        time.sleep(0.2)
+    return jsonify({"error": "Node timeout"}), 504
 
-            .app-title {
-                font-size: 1.35rem;
-                font-weight: 700;
-                letter-spacing: 0.05em;
-                text-transform: uppercase;
-                background: linear-gradient(to right, #fff, #93c5fd);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-            }
+@app.route('/api/stream')
+def stream_video():
+    session_id = request.args.get('session_id')
+    
+    def generate():
+        while True:
+            if session_id in video_buffers and len(video_buffers[session_id]) > 0:
+                chunk = video_buffers[session_id].pop(0)
+                if chunk == b"":
+                    break
+                yield chunk
+            else:
+                time.sleep(0.1)
+                if session_id not in video_buffers:
+                    break
+                    
+    return Response(generate(), mimetype='video/mp4')
 
-            /* Custom Premium Input */
-            .search-box-wrapper {
-                position: relative;
-                display: flex;
-                gap: 10px;
-            }
+# =========================================================================
+# BACKEND COMMUNICATIONS PORTAL FOR HOME PROXY NODE
+# =========================================================================
+@app.route('/api/node/tasks')
+def node_get_tasks():
+    node_ip = request.remote_addr or "Home_Node"
+    active_nodes[node_ip] = time.time()
+    
+    global tasks_queue
+    current_tasks = tasks_queue[:]
+    tasks_queue = []
+    return jsonify(current_tasks)
 
-            .form-control {
-                background: var(--surface-input);
-                color: var(--text-primary);
-                border: 1px solid var(--border-fluent);
-                border-radius: 8px;
-                padding: 12px 16px;
-                font-size: 0.95rem;
-                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            }
-
-            .form-control:focus {
-                background: rgba(35, 35, 60, 0.9);
-                color: #fff;
-                border-color: var(--border-focus);
-                box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
-            }
-
-            .form-control::placeholder {
-                color: #555870;
-            }
-
-            .btn-fluent {
-                background: var(--border-focus);
-                color: #fff;
-                border: none;
-                border-radius: 8px;
-                padding: 0 24px;
-                font-size: 0.9rem;
-                font-weight: 600;
-                letter-spacing: 0.02em;
-                transition: all 0.2s;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                white-space: nowrap;
-            }
-
-            .btn-fluent:hover {
-                background: #4f46e5;
-                transform: translateY(-1px);
-                box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
-            }
-
-            .btn-fluent:active {
-                transform: translateY(0);
-            }
-
-            /* Modern Compact Video Section */
-            .player-section {
-                display: none;
-                background: #000;
-                border-radius: 12px;
-                overflow: hidden;
-                margin-bottom: 1.5rem;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                box-shadow: 0 20px 40px rgba(0,0,0,0.6);
-            }
-
-            video {
-                width: 100%;
-                aspect-ratio: 16 / 9;
-                display: block;
-                max-height: 560px;
-            }
-
-            /* Responsive Mịn Grid */
-            .section-heading {
-                font-size: 0.9rem;
-                font-weight: 600;
-                color: var(--text-secondary);
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-                margin-bottom: 1rem;
-                display: flex;
-                align-items: center;
-                gap: 6px;
-            }
-
-            .v-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-                gap: 16px;
-            }
-
-            .v-item {
-                background: rgba(20, 20, 35, 0.4);
-                border-radius: 10px;
-                overflow: hidden;
-                border: 1px solid rgba(255, 255, 255, 0.04);
-                cursor: pointer;
-                transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-            }
-
-            .v-item:hover {
-                transform: translateY(-4px);
-                border-color: rgba(255, 255, 255, 0.15);
-                background: rgba(30, 30, 55, 0.6);
-                box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4);
-            }
-
-            .v-thumb-container {
-                position: relative;
-                width: 100%;
-                aspect-ratio: 16 / 9;
-                background: #000;
-                overflow: hidden;
-            }
-
-            .v-thumb {
-                width: 100%;
-                height: 100%;
-                object-fit: cover;
-                transition: transform 0.5s ease;
-            }
-
-            .v-item:hover .v-thumb {
-                transform: scale(1.04);
-            }
-
-            .v-info {
-                padding: 12px;
-            }
-
-            .v-title {
-                font-size: 0.85rem;
-                font-weight: 500;
-                line-height: 1.4;
-                color: var(--text-primary);
-                display: -webkit-box;
-                -webkit-line-clamp: 2;
-                -webkit-box-orient: vertical;
-                overflow: hidden;
-                height: 2.8em;
-            }
-
-            /* Custom Skeleton / Dot Animation */
-            .pulse-dot {
-                width: 8px;
-                height: 8px;
-                background-color: #10b981;
-                border-radius: 50%;
-                display: inline-block;
-                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
-                animation: pulse 1.6s infinite;
-            }
-
-            @keyframes pulse {
-                0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-                70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
-                100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container app-container">
-            <div class="fluent-card d-flex align-items-center justify-content-between py-3">
-                <div class="app-title">
-                    <span class="pulse-dot"></span> DogeWatch Link Node
-                </div>
-                <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-fluent)">v2.5 P2P Hybrid</span>
-            </div>
-
-            <div class="fluent-card">
-                <div class="search-box-wrapper">
-                    <input type="text" id="searchInput" class="form-control" placeholder="Nhập tên video hoặc từ khóa bạn muốn tìm...">
-                    <button onclick="runTask('search')" id="searchBtn" class="btn btn-fluent">
-                        TÌM KIẾM
-                    </button>
-                </div>
-            </div>
-
-            <div id="playerSection" class="player-section shadow-lg">
-                <video id="videoPlayer" autoplay controls playsinline></video>
-            </div>
-
-            <div class="fluent-card">
-                <div class="section-heading">
-                    📦 Danh sách kết quả tìm kiếm
-                </div>
-                <div id="videoGrid" class="v-grid">
-                    <div class="text-center w-100 py-4" style="grid-column: 1/-1; color: var(--text-secondary); font-size: 0.9rem;">
-                        Chưa có dữ liệu. Vui lòng nhập từ khóa tìm kiếm bên trên.
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <script>
-            let currentTaskId = "";
-            let session_id = "";
-
-            async function runTask(type, val = "") {
-                const btn = document.getElementById('searchBtn');
-                if (type === 'extract') {
-                    session_id = "sess_" + Math.random().toString(36).substring(2, 15);
-                    btn.disabled = true;
-                    btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status"></span>ĐANG KẾT NỐI...`;
-                } else {
-                    btn.disabled = true;
-                    btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status"></span>ĐANG TÌM...`;
-                }
-                
-                const q = document.getElementById('searchInput').value;
-                try {
-                    const res = await fetch('/api/create_task', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({type: type, query: q, video_id: val, session_id: session_id})
-                    });
-                    const d = await res.json();
-                    currentTaskId = d.task_id;
-                    pollResult();
-                } catch(e) {
-                    btn.disabled = false;
-                    btn.innerText = "TÌM KIẾM";
-                }
-            }
-
-            async function pollResult() {
-                try {
-                    const res = await fetch('/api/poll_result?task_id=' + currentTaskId);
-                    const d = await res.json();
-                    if (d.status === 'completed') {
-                        const btn = document.getElementById('searchBtn');
-                        btn.disabled = false;
-                        btn.innerText = "TÌM KIẾM";
-                        
-                        if(d.result.videos) renderGrid(d.result.videos);
-                        if(d.result.streaming_ready) {
-                            document.getElementById('playerSection').style.display = "block";
-                            const player = document.getElementById('videoPlayer');
-                            player.src = "/stream/" + session_id;
-                            player.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        }
-                    } else { 
-                        setTimeout(pollResult, 1000); 
-                    }
-                } catch(e) {
-                    const btn = document.getElementById('searchBtn');
-                    btn.disabled = false;
-                    btn.innerText = "TÌM KIẾM";
-                }
-            }
-
-            function renderGrid(videos) {
-                let h = "";
-                if(videos.length === 0) {
-                    h = `<div class="text-center w-100 py-4" style="grid-column: 1/-1; color: var(--text-secondary);">Không tìm thấy video nào.</div>`;
-                    document.getElementById('videoGrid').innerHTML = h;
-                    return;
-                }
-                videos.forEach(v => {
-                    h += `<div class="v-item" onclick="runTask('extract', '${v.id}')">
-                        <div class="v-thumb-container">
-                            <img src="${v.thumbnail}" class="v-thumb" loading="lazy">
-                        </div>
-                        <div class="v-info">
-                            <div class="v-title">${v.title}</div>
-                        </div>
-                    </div>`;
-                });
-                document.getElementById('videoGrid').innerHTML = h;
-            }
-        </script>
-    </body>
-    </html>
-    """)
-
-@app.route('/api/create_task', methods=['POST'])
-def create_task():
+@app.route('/api/node/submit', methods=['POST'])
+def node_submit_task():
     data = request.json
-    tid = str(uuid.uuid4())
-    tasks[tid] = {
-        'task_id': tid, 'type': data.get('type'), 'query': data.get('query'), 
-        'video_id': data.get('video_id'), 'session_id': data.get('session_id'), 'status': 'pending'
-    }
-    return jsonify({"task_id": tid})
+    tasks_results[data['task_id']] = data['result']
+    return jsonify({"status": "acknowledged"})
 
-@app.route('/api/poll_result')
-def poll_result():
-    tid = request.args.get('task_id')
-    if tid in tasks and tasks[tid]['status'] == 'completed':
-        return jsonify({"status": "completed", "result": tasks[tid]['result']})
-    return jsonify({"status": "pending"})
+@app.route('/api/node/upload_chunk', methods=['POST'])
+def node_upload_chunk():
+    session_id = request.args.get('session_id')
+    chunk_data = request.data
+    if session_id in video_buffers:
+        video_buffers[session_id].append(chunk_data)
+    return jsonify({"status": "pushed"})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=10000)

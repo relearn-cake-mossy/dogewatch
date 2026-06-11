@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, Response, render_template_string
 import uuid
 import time
+import threading
 
 app = Flask(__name__)
 
@@ -10,6 +11,9 @@ tasks_results = {}
 video_buffers = {}
 active_nodes = {}
 
+# Khóa Lock để đồng bộ hóa việc đọc/ghi hàng đợi tác vụ khi Proxy chạy đa luồng/đa nhân
+queue_lock = threading.Lock()
+
 # Premium Windows 11 Fluent Design with Bespoke Custom Video Player Engine
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -18,7 +22,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DogeWatch</title>
-    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght=300;400;500;600;700&family=Inter:wght=300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-mica: #030307;
@@ -427,32 +431,25 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- IMMERSIVE PREMIUM CUSTOM MEDIA CONSOLE STAGE -->
             <div id="theater-stage">
                 <div class="player-canvas" id="player-view-container">
                     
-                    <!-- Native Chrome Interface Hook stripped intentionally -->
                     <video id="nexus-core-player" playsinline crossorigin="anonymous"></video>
                     
-                    <!-- Bespoke System Overlay HUD Control Rack -->
                     <div class="nexus-ui-controls" id="custom-hud-bar">
                         <div class="controls-row-main">
                             
-                            <!-- Play/Pause Toggle -->
                             <button class="ctrl-btn" id="hud-play-trigger" title="Toggle Play State">
                                 <svg id="play-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                                 <svg id="pause-icon" viewBox="0 0 24 24" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                             </button>
 
-                            <!-- The Custom Timeline Scrubber Engine (Tua Video) -->
                             <div class="scrub-timeline-container">
                                 <input type="range" class="fluent-scrubber" id="hud-timeline-slider" min="0" max="100" value="0">
                             </div>
 
-                            <!-- Hardware Telemetry Clock -->
                             <div class="time-panel" id="hud-time-clock">0:00 / 0:00</div>
 
-                            <!-- Integrated Volume Node -->
                             <div class="volume-cluster">
                                 <button class="ctrl-btn" id="hud-mute-trigger">
                                     <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
@@ -681,21 +678,27 @@ def index():
 def get_node_status():
     if not active_nodes:
         return jsonify({"connected": False})
-    last_node = list(active_nodes.values())[-1]
+    # Lấy mốc thời gian ping mới nhất của cụm Cluster thay vì lấy index cứng [-1] dễ bị sai lệch khi đa luồng
+    last_node = max(active_nodes.values())
     elapsed = int(time.time() - last_node)
-    return jsonify({"connected": elapsed < 15, "last_seen": elapsed})
+    # Tăng thời gian kiểm tra sống từ 15s lên 45s để giảm tối đa tình trạng "Uplink Terminated" ảo do Render lag
+    return jsonify({"connected": elapsed < 45, "last_seen": elapsed})
 
 @app.route('/api/web/search')
 def web_search():
     query = request.args.get('q', 'trending')
     task_id = str(uuid.uuid4())
-    tasks_queue.append({'task_id': task_id, 'type': 'search', 'query': query})
+    
+    # Sử dụng lock bảo vệ dữ liệu luồng để tránh xung đột khi ghi task mới vào queue
+    with queue_lock:
+        tasks_queue.append({'task_id': task_id, 'type': 'search', 'query': query})
     
     start = time.time()
-    while time.time() - start < 12:
+    # Tăng vòng lặp chờ từ 12 giây lên 30 giây để Proxy Python có đủ thời gian cào dữ liệu và gửi trả lên Render
+    while time.time() - start < 30:
         if task_id in tasks_results:
             return jsonify(tasks_results.pop(task_id))
-        time.sleep(0.2)
+        time.sleep(0.1) # Tốc độ check 0.1s giúp phản hồi mượt mà hơn
     return jsonify({"videos": []})
 
 @app.route('/api/web/extract')
@@ -705,19 +708,22 @@ def web_extract():
     task_id = str(uuid.uuid4())
     
     video_buffers[session_id] = []
-    tasks_queue.append({
-        'task_id': task_id, 
-        'type': 'extract', 
-        'video_id': video_id, 
-        'session_id': session_id
-    })
+    
+    with queue_lock:
+        tasks_queue.append({
+            'task_id': task_id, 
+            'type': 'extract', 
+            'video_id': video_id, 
+            'session_id': session_id
+        })
     
     start = time.time()
-    while time.time() - start < 10:
+    # Tăng vòng lặp chờ trích xuất stream từ 10 giây lên 30 giây tránh đứt gãy luồng video
+    while time.time() - start < 30:
         if task_id in tasks_results:
             tasks_results.pop(task_id)
             return jsonify({"session_id": session_id})
-        time.sleep(0.2)
+        time.sleep(0.1)
     return jsonify({"error": "Node timeout"}), 504
 
 @app.route('/api/stream')
@@ -747,8 +753,10 @@ def node_get_tasks():
     active_nodes[node_ip] = time.time()
     
     global tasks_queue
-    current_tasks = tasks_queue[:]
-    tasks_queue = []
+    # Sử dụng lock bảo vệ dữ liệu luồng khi dọn sạch hàng đợi, triệt tiêu lỗi nuốt task giữa các luồng Proxy song song
+    with queue_lock:
+        current_tasks = tasks_queue[:]
+        tasks_queue = []
     return jsonify(current_tasks)
 
 @app.route('/api/node/submit', methods=['POST'])

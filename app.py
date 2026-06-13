@@ -757,7 +757,7 @@ def index():
 @app.route('/api/web/status', methods=['GET'])
 def web_status():
     try:
-        r = requests.get(f"{PROXY_NODE_URL}/", timeout=5)
+        r = requests.get(f"{PROXY_NODE_URL}/", timeout=50)
         if r.status_code == 200:
             return jsonify({"online": True})
         return jsonify({"online": False})

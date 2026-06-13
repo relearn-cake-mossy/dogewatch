@@ -758,10 +758,10 @@ def index():
 def web_status():
     try:
         r = requests.get(f"{PROXY_NODE_URL}/", timeout=5)
-        print(f" -> [Heartbeat] Connected to Node successfully. Status code: {r.status_code}")
-        return jsonify({"online": True})
-    except requests.exceptions.RequestException as e:
-        print(f" -> [Heartbeat ERROR] Failed to connect to Node: {e}")
+        if r.status_code == 200:
+            return jsonify({"online": True})
+        return jsonify({"online": False})
+    except:
         return jsonify({"online": False})
 
 @app.route('/api/web/search', methods=['GET'])
@@ -784,10 +784,8 @@ def web_search():
     try:
         response = requests.get(f"{PROXY_NODE_URL}/scrape", params={"query": refined_query}, timeout=25)
         return jsonify(response.json())
-    except requests.exceptions.RequestException as e:
-        print(f"[Render Error v0.0.5] Node communication failure: {e}")
-        return jsonify({"error": "Node not responding", "videos": []}), 504
+    except:
+        return jsonify({"error": "Proxy offline", "videos": []}), 504
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=5000, threaded=True)

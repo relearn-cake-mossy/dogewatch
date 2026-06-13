@@ -1,10 +1,11 @@
 import os
+import re
+import urllib.parse
 import requests
+import yt_dlp
 from flask import Flask, request, jsonify, render_template_string
 
 app = Flask(__name__)
-
-PROXY_NODE_URL = "http://botdic.nethr.nl:10416"
 
 HTML_LAYOUT = """
 <!DOCTYPE html>
@@ -12,7 +13,7 @@ HTML_LAYOUT = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DOGEWATCH v0.0.5 - Cyber Premium</title>
+    <title>DOGEWATCH v0.0.6 - Cyber Premium (yt-dlp Engine)</title>
     <style>
         :root {
             --bg-gradient: linear-gradient(135deg, #070913 0%, #0c0f24 100%);
@@ -434,10 +435,10 @@ HTML_LAYOUT = """
             padding-top: 56.25%;
             background: #000;
         }
-        .iframe-container iframe {
+        .iframe-container video {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
-            border: none;
+            background: #000;
         }
         .modal-ctrl {
             padding: 15px 24px;
@@ -485,7 +486,7 @@ HTML_LAYOUT = """
         <div>
             <div class="brand-zone">
                 <div class="brand">⚡ DOGEWATCH</div>
-                <div class="version">Cluster v0.0.5</div>
+                <div class="version">Cluster v0.0.6</div>
             </div>
             
             <div class="status-card">
@@ -509,13 +510,9 @@ HTML_LAYOUT = """
                     <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16"><path d="M3 5c0-1.103.897-2 2-2h6c1.103 0 2 .897 2 2v6c0 1.103-.897 2-2 2H5c-1.103 0-2-.897-2-2V5zm7 3-3-2v4l3-2z"/></svg>
                     Shorts Station
                 </div>
-                <div class="menu-item" onclick="switchTab('channel', this)">
-                    <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2 1H6a4 4 0 0 0-4 4v1h12v-1a4 4 0 0 0-4-4z"/></svg>
-                    Channel Hub
-                </div>
             </div>
         </div>
-        <div style="font-size: 11px; color: var(--text-muted)">Premium Glossy Render Architecture</div>
+        <div style="font-size: 11px; color: var(--text-muted)">Premium Glossy yt-dlp Architecture</div>
     </div>
 
     <div class="main-container">
@@ -530,7 +527,7 @@ HTML_LAYOUT = """
             </div>
         </div>
 
-        <div id="loading-spinner" class="loader">🪐 Transmitting uplink signals. Processing data via Home Node Proxy...</div>
+        <div id="loading-spinner" class="loader">🪐 Transmitting uplink signals. Processing data via Cloud Proxy Engine...</div>
         <div id="empty-state" class="status-info">System is ready. Enter keywords and press Discover.</div>
 
         <div id="results-grid" class="grid-view grid-videos"></div>
@@ -539,10 +536,10 @@ HTML_LAYOUT = """
     <div id="cyber-player-modal" class="player-modal">
         <div id="player-box-layout" class="modal-box">
             <div class="iframe-container">
-                <iframe id="native-core-player" src="" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+                <video id="native-core-player" controls autoplay name="media"></video>
             </div>
             <div class="modal-ctrl">
-                <div id="player-title-display" class="modal-video-title">Connecting signal...</div>
+                <div id="player-title-display" class="modal-video-title">Extracting video streams...</div>
                 <button class="btn-close-player" onclick="closeCyberPlayer()">CLOSE PLAYER</button>
             </div>
         </div>
@@ -579,9 +576,6 @@ HTML_LAYOUT = """
             } else if (tabType === 'shorts') {
                 titleEl.innerText = "Shorts Station";
                 gridEl.className = "grid-view grid-shorts";
-            } else if (tabType === 'channel') {
-                titleEl.innerText = "Channel Hub";
-                gridEl.className = "grid-view grid-channels";
             }
         }
 
@@ -593,11 +587,11 @@ HTML_LAYOUT = """
                 const data = await res.json();
                 if (data.online) {
                     pulse.className = "pulse-dot pulse-online";
-                    text.innerText = "Uplink Active (0s back)";
+                    text.innerText = "Cloud Node Active";
                     text.style.color = "#10b981";
                 } else {
                     pulse.className = "pulse-dot";
-                    text.innerText = "Uplink Offline";
+                    text.innerText = "Node Error";
                     text.style.color = "#ef4444";
                 }
             } catch {
@@ -636,47 +630,57 @@ HTML_LAYOUT = """
                             renderVideoCard(item, gridEl);
                         } else if (currentTab === 'shorts') {
                             renderShortsCard(item, gridEl);
-                        } else if (currentTab === 'channel') {
-                            renderChannelCard(item, gridEl);
                         }
                     });
                 } else {
-                    showErrorState("No responsive node segments or data matched parameters.");
+                    showErrorState("No data matched search parameters.");
                 }
             } catch (err) {
                 document.getElementById('loading-spinner').style.display = 'none';
-                showErrorState("Fatal Error: Uplink cross-stream transmission failed.");
+                showErrorState("Fatal Error: Cloud node transmission failed.");
             }
         }
 
-        function launchCyberPlayer(videoId, videoTitle, mode) {
+        async function launchCyberPlayer(videoId, videoTitle, mode) {
             const modal = document.getElementById('cyber-player-modal');
             const box = document.getElementById('player-box-layout');
-            const iframe = document.getElementById('native-core-player');
+            const player = document.getElementById('native-core-player');
             const titleDisplay = document.getElementById('player-title-display');
 
-            titleDisplay.innerText = videoTitle;
+            titleDisplay.innerText = "Extracting Stream: " + videoTitle;
+            player.src = '';
             
             if (mode === 'shorts') {
                 box.classList.add('shorts-mode');
-                iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0&showinfo=0`;
             } else {
                 box.classList.remove('shorts-mode');
-                iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0&showinfo=0`;
             }
 
             modal.style.display = 'flex';
             setTimeout(() => modal.classList.add('active'), 20);
+
+            try {
+                const res = await fetch(`/api/web/stream?id=${videoId}`);
+                const data = await res.json();
+                if(data.url) {
+                    player.src = data.url;
+                    titleDisplay.innerText = videoTitle;
+                } else {
+                    titleDisplay.innerText = "Failed to load media source.";
+                }
+            } catch {
+                titleDisplay.innerText = "Network extraction error.";
+            }
         }
 
         function closeCyberPlayer() {
             const modal = document.getElementById('cyber-player-modal');
-            const iframe = document.getElementById('native-core-player');
+            const player = document.getElementById('native-core-player');
             
             modal.classList.remove('active');
             setTimeout(() => {
                 modal.style.display = 'none';
-                iframe.src = ''; 
+                player.src = ''; 
             }, 300);
         }
 
@@ -721,21 +725,6 @@ HTML_LAYOUT = """
             grid.appendChild(card);
         }
 
-        function renderChannelCard(channel, grid) {
-            const card = document.createElement('div');
-            card.className = 'card-channel';
-            const safeTitle = channel.title.replace(/'/g, "\\'");
-            card.innerHTML = `
-                <div class="channel-avatar">
-                    <img src="${channel.thumbnail || 'https://www.gstatic.com/youtube/img/originals/channels/youtube_profile_avatar_96x96.png'}" alt="avatar">
-                </div>
-                <div class="channel-name">${channel.title}</div>
-                <div class="channel-meta">ID: ${channel.id}</div>
-                <button onclick="launchCyberPlayer('${channel.id}', '${safeTitle}', 'video')" class="btn-visit" style="width: 100%;">View Channel</button>
-            `;
-            grid.appendChild(card);
-        }
-
         function showErrorState(msg) {
             const emptyState = document.getElementById('empty-state');
             emptyState.style.display = 'block';
@@ -756,13 +745,28 @@ def index():
 
 @app.route('/api/web/status', methods=['GET'])
 def web_status():
+    return jsonify({"online": True})
+
+@app.route('/api/web/stream', methods=['GET'])
+def web_stream():
+    v_id = request.args.get('id', '')
+    if not v_id:
+        return jsonify({"error": "Missing video ID"}), 400
+        
+    ydl_opts = {
+        'format': 'best',
+        'quiet': True,
+        'no_warnings': True,
+        'skip_download': True
+    }
+    
     try:
-        r = requests.get(f"{PROXY_NODE_URL}/", timeout=50)
-        if r.status_code == 200:
-            return jsonify({"online": True})
-        return jsonify({"online": False})
-    except:
-        return jsonify({"online": False})
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={v_id}", download=False)
+            stream_url = info.get('url', '')
+            return jsonify({"url": stream_url})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/web/search', methods=['GET'])
 def web_search():
@@ -774,18 +778,65 @@ def web_search():
             query = 'trending'
         else:
             return jsonify({"videos": []})
-    
+            
     refined_query = query
     if search_type == 'shorts':
         refined_query = f"{query} shorts"
-    elif search_type == 'channel':
-        refined_query = f"{query} channel"
-        
+
+    p_list = []
     try:
-        response = requests.get(f"{PROXY_NODE_URL}/scrape", params={"query": refined_query}, timeout=25)
-        return jsonify(response.json())
+        p_res = requests.get("http://mcbot465.freezehost.com:10861/raw", timeout=5)
+        if p_res.status_code == 200:
+            p_list = [line.strip() for line in p_res.text.splitlines() if line.strip()]
     except:
-        return jsonify({"error": "Proxy offline", "videos": []}), 504
+        pass
+
+    html = ""
+    success = False
+    proxies_to_try = p_list[:5] if p_list else []
+    proxies_to_try.append(None)
+
+    for p in proxies_to_try:
+        proxy_dict = None
+        if p:
+            if not p.startswith(('http://', 'https://', 'socks')):
+                proxy_dict = {"http": f"http://{p}", "https": f"http://{p}"}
+            else:
+                proxy_dict = {"http": p, "https": p}
+        try:
+            encoded_query = urllib.parse.quote_plus(refined_query)
+            url = f"https://www.youtube.com/results?search_query={encoded_query}"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            response = requests.get(url, headers=headers, proxies=proxy_dict, timeout=6)
+            if response.status_code == 200 and "videoId" in response.text:
+                html = response.text
+                success = True
+                break
+        except:
+            continue
+
+    if not success or not html:
+        return jsonify({"videos": [], "error": "Cloud execution failure"}), 500
+
+    video_ids = re.findall(r'"videoId":"([^"]+)"', html)
+    titles = re.findall(r'"title":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"', html)
+
+    videos = []
+    seen = set()
+    for i in range(min(len(video_ids), len(titles))):
+        v_id = video_ids[i]
+        title = titles[i]
+        if v_id not in seen:
+            seen.add(v_id)
+            videos.append({
+                "id": v_id,
+                "title": title,
+                "thumbnail": f"https://i.ytimg.com/vi/{v_id}/hqdefault.jpg"
+            })
+    return jsonify({"videos": videos})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, threaded=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, threaded=True)

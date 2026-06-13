@@ -4,16 +4,15 @@ from flask import Flask, request, jsonify, render_template_string
 
 app = Flask(__name__)
 
-# Cấu hình URL dẫn về con proxy máy nhà của bạn
 PROXY_NODE_URL = "http://botdic.nethr.nl:10416"
 
 HTML_LAYOUT = """
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DOGEWATCH v0.0.5 - Cyber Premium (Fixed Player)</title>
+    <title>DOGEWATCH v0.0.5 - Cyber Premium</title>
     <style>
         :root {
             --bg-gradient: linear-gradient(135deg, #070913 0%, #0c0f24 100%);
@@ -36,7 +35,6 @@ HTML_LAYOUT = """
             overflow: hidden;
         }
 
-        /* Sidebar Kính Mờ */
         .sidebar {
             width: 280px;
             background: var(--panel-bg);
@@ -135,7 +133,6 @@ HTML_LAYOUT = """
             padding-left: 14px;
         }
 
-        /* Vùng nội dung chính */
         .main-container {
             flex: 1;
             padding: 40px;
@@ -154,7 +151,6 @@ HTML_LAYOUT = """
             font-weight: 800;
         }
 
-        /* Thanh tìm kiếm bóng bẩy */
         .search-wrapper {
             display: flex;
             background: var(--panel-bg);
@@ -200,14 +196,12 @@ HTML_LAYOUT = """
         }
         .query-log span { color: var(--accent-gold); font-weight: bold; }
 
-        /* Khối hiển thị kết quả */
         .grid-view {
             display: grid;
             gap: 25px;
             margin-top: 15px;
         }
 
-        /* Kiểu dáng video thông thường */
         .grid-videos {
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
         }
@@ -230,7 +224,7 @@ HTML_LAYOUT = """
         .thumb-wrap {
             position: relative;
             width: 100%;
-            padding-top: 56.25%; /* Tỉ lệ 16:9 */
+            padding-top: 56.25%;
             background: #000;
         }
 
@@ -252,7 +246,6 @@ HTML_LAYOUT = """
             overflow: hidden;
         }
 
-        /* Kiểu dáng SHORTS (Tỉ lệ 9:16 dọc) */
         .grid-shorts {
             grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
         }
@@ -317,7 +310,6 @@ HTML_LAYOUT = """
             box-shadow: 0 2px 8px rgba(255,71,87,0.4);
         }
 
-        /* Kiểu dáng KÊNH YOUTUBE CHI TIẾT (Channel Hub) */
         .grid-channels {
             grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
         }
@@ -387,7 +379,6 @@ HTML_LAYOUT = """
             color: #000;
         }
 
-        /* Trạng thái trống/Loading */
         .status-info {
             padding: 30px;
             background: rgba(255,255,255,0.02);
@@ -406,7 +397,6 @@ HTML_LAYOUT = """
             font-weight: bold;
         }
 
-        /* ==================== GLASSMORPHISM MODAL PLAYER SYSTEM ==================== */
         .player-modal {
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -438,11 +428,10 @@ HTML_LAYOUT = """
         .player-modal.active .modal-box {
             transform: scale(1);
         }
-        /* Cấu trúc player tỉ lệ động */
         .iframe-container {
             position: relative;
             width: 100%;
-            padding-top: 56.25%; /* Mặc định 16:9 */
+            padding-top: 56.25%;
             background: #000;
         }
         .iframe-container iframe {
@@ -482,12 +471,11 @@ HTML_LAYOUT = """
             background: #ff6b81;
             transform: translateY(-1px);
         }
-        /* Chế độ dọc dành riêng cho Shorts */
         .modal-box.shorts-mode {
             max-width: 420px;
         }
         .modal-box.shorts-mode .iframe-container {
-            padding-top: 177.77%; /* Tỉ lệ 9:16 dọc hoàn hảo */
+            padding-top: 177.77%;
         }
     </style>
 </head>
@@ -509,6 +497,10 @@ HTML_LAYOUT = """
             </div>
 
             <div class="menu-list">
+                <div class="menu-item" onclick="switchTab('trending', this)">
+                    <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16"><path d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .5 1.5-1 4-2.5 4.5-1 1-1.5 1-2 2-.5.5-.5 1.5-.5 2 0 2 1.5 3 1.5 3zM3.6 10.5c0-2.984 1.416-4.945 2.304-6.079l.011-.014.01-.013c.12-.152.341-.115.41.072l.003.009.002.005.004.015.011.042c.11.41.222.846.336 1.28l.002.008.003.012c.074.288.15.578.232.864.073.256.376.326.546.136.634-.711 1.223-1.677 1.644-2.733.053-.133.242-.119.276.022a16.2 16.2 0 0 1 .18 2.06c.03.627.014 1.402-.178 2.152-.163.639-.462 1.224-.913 1.688-.8.824-1.743 1.255-2.744 1.255-2.115 0-3.731-1.696-3.731-3.805z"/></svg>
+                    Trending Home
+                </div>
                 <div class="menu-item" onclick="switchTab('video', this)">
                     <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16"><path d="M0 12V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm6.79-6.907A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814l-3.5-2.5z"/></svg>
                     Search Station
@@ -528,9 +520,9 @@ HTML_LAYOUT = """
 
     <div class="main-container">
         <div class="header-section">
-            <h2 id="station-title">Search Station</h2>
+            <h2 id="station-title">Trending Home</h2>
             <div class="search-wrapper">
-                <input type="text" id="search-core" placeholder="Nhập từ khóa tìm kiếm..." value="channy">
+                <input type="text" id="search-core" placeholder="Enter keywords to search...">
                 <button onclick="performSearch()">DISCOVER</button>
             </div>
             <div class="query-log" id="query-log" style="display:none;">
@@ -538,8 +530,8 @@ HTML_LAYOUT = """
             </div>
         </div>
 
-        <div id="loading-spinner" class="loader">🪐 Đang truyền tín hiệu yêu cầu Home Node xử lý dữ liệu qua Proxy...</div>
-        <div id="empty-state" class="status-info">Hệ thống đang sẵn sàng. Hãy nhập từ khóa và nhấn Discover.</div>
+        <div id="loading-spinner" class="loader">🪐 Transmitting uplink signals. Processing data via Home Node Proxy...</div>
+        <div id="empty-state" class="status-info">System is ready. Enter keywords and press Discover.</div>
 
         <div id="results-grid" class="grid-view grid-videos"></div>
     </div>
@@ -550,18 +542,21 @@ HTML_LAYOUT = """
                 <iframe id="native-core-player" src="" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
             </div>
             <div class="modal-ctrl">
-                <div id="player-title-display" class="modal-video-title">Đang kết nối tín hiệu...</div>
-                <button class="btn-close-player" onclick="closeCyberPlayer()">ĐÓNG PLAYER</button>
+                <div id="player-title-display" class="modal-video-title">Connecting signal...</div>
+                <button class="btn-close-player" onclick="closeCyberPlayer()">CLOSE PLAYER</button>
             </div>
         </div>
     </div>
 
     <script>
-        let currentTab = 'video';
+        let currentTab = 'trending';
 
         document.addEventListener("DOMContentLoaded", () => {
             const defaultActive = document.querySelector('.menu-item');
-            if (defaultActive) defaultActive.classList.add('active');
+            if (defaultActive) {
+                defaultActive.classList.add('active');
+                switchTab('trending', defaultActive);
+            }
         });
 
         function switchTab(tabType, element) {
@@ -574,7 +569,11 @@ HTML_LAYOUT = """
             gridEl.innerHTML = '';
             document.getElementById('empty-state').style.display = 'block';
 
-            if(tabType === 'video') {
+            if(tabType === 'trending') {
+                titleEl.innerText = "Trending Home";
+                gridEl.className = "grid-view grid-videos";
+                performSearch();
+            } else if(tabType === 'video') {
                 titleEl.innerText = "Search Station";
                 gridEl.className = "grid-view grid-videos";
             } else if (tabType === 'shorts') {
@@ -609,7 +608,12 @@ HTML_LAYOUT = """
         }
 
         async function performSearch() {
-            const queryInput = document.getElementById('search-core').value.trim();
+            let queryInput = document.getElementById('search-core').value.trim();
+            
+            if (!queryInput && currentTab === 'trending') {
+                queryInput = "trending";
+            }
+
             if (!queryInput) return;
 
             document.getElementById('query-log').style.display = 'block';
@@ -628,7 +632,7 @@ HTML_LAYOUT = """
 
                 if (data.videos && data.videos.length > 0) {
                     data.videos.forEach(item => {
-                        if (currentTab === 'video') {
+                        if (currentTab === 'trending' || currentTab === 'video') {
                             renderVideoCard(item, gridEl);
                         } else if (currentTab === 'shorts') {
                             renderShortsCard(item, gridEl);
@@ -641,11 +645,10 @@ HTML_LAYOUT = """
                 }
             } catch (err) {
                 document.getElementById('loading-spinner').style.display = 'none';
-                showErrorState("Fatal Error: Chéo luồng dữ liệu uplink thất bại.");
+                showErrorState("Fatal Error: Uplink cross-stream transmission failed.");
             }
         }
 
-        // CONTROL CORE PLAYER CONTROL (FIX TUA VIDEO)
         function launchCyberPlayer(videoId, videoTitle, mode) {
             const modal = document.getElementById('cyber-player-modal');
             const box = document.getElementById('player-box-layout');
@@ -654,7 +657,6 @@ HTML_LAYOUT = """
 
             titleDisplay.innerText = videoTitle;
             
-            // Xử lý tỉ lệ khung hình cho Shorts / Video thường nhằm hiển thị đẹp nhất
             if (mode === 'shorts') {
                 box.classList.add('shorts-mode');
                 iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0&showinfo=0`;
@@ -674,11 +676,10 @@ HTML_LAYOUT = """
             modal.classList.remove('active');
             setTimeout(() => {
                 modal.style.display = 'none';
-                iframe.src = ''; // Clear nguồn phát để dừng âm thanh ngay lập tức
+                iframe.src = ''; 
             }, 300);
         }
 
-        // Tự động tắt khi click ra vùng ngoài Modal
         window.onclick = function(event) {
             const modal = document.getElementById('cyber-player-modal');
             if (event.target === modal) {
@@ -689,7 +690,6 @@ HTML_LAYOUT = """
         function renderVideoCard(video, grid) {
             const card = document.createElement('div');
             card.className = 'card-video';
-            // Khử dấu nháy đơn trong tiêu đề để tránh lỗi cú pháp JS khi truyền tham số
             const safeTitle = video.title.replace(/'/g, "\\'");
             card.innerHTML = `
                 <div class="thumb-wrap">
@@ -698,7 +698,7 @@ HTML_LAYOUT = """
                 <div class="card-body">
                     <h4 class="card-title">${video.title}</h4>
                     <div style="font-size:12px; color:var(--text-muted); margin-bottom: 12px;">Video ID: ${video.id}</div>
-                    <button onclick="launchCyberPlayer('${video.id}', '${safeTitle}', 'video')" class="btn-visit" style="width: 100%;">Xem Trực Tiếp</button>
+                    <button onclick="launchCyberPlayer('${video.id}', '${safeTitle}', 'video')" class="btn-visit" style="width: 100%;">Watch Stream</button>
                 </div>
             `;
             grid.appendChild(card);
@@ -715,7 +715,7 @@ HTML_LAYOUT = """
                 </div>
                 <div class="short-overlay">
                     <p class="short-title">${short.title}</p>
-                    <button onclick="launchCyberPlayer('${short.id}', '${safeTitle}', 'shorts')" class="btn-visit" style="margin-top:8px; width:100%;">Bật Shorts dọc</button>
+                    <button onclick="launchCyberPlayer('${short.id}', '${safeTitle}', 'shorts')" class="btn-visit" style="margin-top:8px; width:100%;">Open Short</button>
                 </div>
             `;
             grid.appendChild(card);
@@ -731,7 +731,7 @@ HTML_LAYOUT = """
                 </div>
                 <div class="channel-name">${channel.title}</div>
                 <div class="channel-meta">ID: ${channel.id}</div>
-                <button onclick="launchCyberPlayer('${channel.id}', '${safeTitle}', 'video')" class="btn-visit" style="width: 100%;">Xem Chi Tiết Tuyến Bài</button>
+                <button onclick="launchCyberPlayer('${channel.id}', '${safeTitle}', 'video')" class="btn-visit" style="width: 100%;">View Channel</button>
             `;
             grid.appendChild(card);
         }
@@ -757,12 +757,12 @@ def index():
 @app.route('/api/web/status', methods=['GET'])
 def web_status():
     try:
-        r = requests.get(f"{PROXY_NODE_URL}/ping", timeout=3)
-        if r.status_code == 200:
-            return jsonify({"online": True})
-    except Exception:
-        pass
-    return jsonify({"online": False})
+        r = requests.get(f"{PROXY_NODE_URL}/", timeout=5)
+        print(f" -> [Heartbeat] Connected to Node successfully. Status code: {r.status_code}")
+        return jsonify({"online": True})
+    except requests.exceptions.RequestException as e:
+        print(f" -> [Heartbeat ERROR] Failed to connect to Node: {e}")
+        return jsonify({"online": False})
 
 @app.route('/api/web/search', methods=['GET'])
 def web_search():
@@ -770,7 +770,10 @@ def web_search():
     search_type = request.args.get('type', 'video')
     
     if not query:
-        return jsonify({"videos": []})
+        if search_type == 'trending':
+            query = 'trending'
+        else:
+            return jsonify({"videos": []})
     
     refined_query = query
     if search_type == 'shorts':
@@ -782,8 +785,8 @@ def web_search():
         response = requests.get(f"{PROXY_NODE_URL}/scrape", params={"query": refined_query}, timeout=25)
         return jsonify(response.json())
     except requests.exceptions.RequestException as e:
-        print(f"[Render Error v0.0.5] Đứt kết nối luồng Node máy nhà: {e}")
-        return jsonify({"error": "Node không phản hồi", "videos": []}), 504
+        print(f"[Render Error v0.0.5] Node communication failure: {e}")
+        return jsonify({"error": "Node not responding", "videos": []}), 504
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))

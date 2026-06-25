@@ -1,0 +1,22 @@
+services:
+  # ── Web App (giao diện) ──────────────────────────────────────────────────
+  - type: web
+    name: ytview-app
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 60
+    envVars:
+      - key: PROXY_URL
+        value: http://botdic.nethr.nl:10416
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+
+  # ── Proxy Server (yt-dlp) ────────────────────────────────────────────────
+  - type: web
+    name: ytview-proxy
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn proxy:app --bind 0.0.0.0:$PORT --workers 4 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
